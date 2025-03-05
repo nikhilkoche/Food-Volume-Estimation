@@ -346,8 +346,11 @@ def write_label_file(labels_to_class_names, dataset_dir,
   """
   labels_filename = os.path.join(dataset_dir, filename)
   # with tf.gfile.Open(labels_filename, 'w') as f:
-  with tf.io.gfile.Open(labels_filename, 'w') as f:
+  with tf.io.gfile.GFile(labels_filename, 'w') as f:
 
     for label in labels_to_class_names:
       class_name = labels_to_class_names[label]
       f.write('%d:%s\n' % (label, class_name))
+
+
+

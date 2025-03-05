@@ -4,9 +4,9 @@ from __future__ import print_function
 
 
 import tensorflow as tf
-
-slim = tf.contrib.slim
-
+import tf_slim as slim
+# slim = tf.contrib.slim
+slim = slim
 
 def block35(net, scale=1.0, activation_fn=tf.nn.relu, scope=None, reuse=None):
   """Builds the 35x35 resnet block."""

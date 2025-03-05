@@ -1,88 +1,110 @@
 """
 This code is used to evaluate our trained model against a number of datasets.
 """
-import functools
+"""
+This code is used to evaluate our trained model against a dataset.
+"""
 import argparse
 import os
-import itertools
- 
 import tensorflow as tf
+import numpy as np
+import cv2
+from tensorflow.keras.preprocessing import image_dataset_from_directory
+from tensorflow.keras.layers import Layer
 
-from model import input_fn, get_model_fn
-from dataset_utils import read_label_file
+# =============== CONFIGURATION ===============
+IMAGE_SIZE = 299
+BATCH_SIZE = 16  # Must match training batch size
 
-import scipy.misc
+class CustomScaleLayer(Layer):
+    """A custom scaling layer (example implementation)."""
+    def __init__(self, scale_factor=1.0, **kwargs):
+        super(CustomScaleLayer, self).__init__(**kwargs)
+        self.scale_factor = scale_factor
 
-tf.logging.set_verbosity(tf.logging.INFO)
+    def call(self, inputs):
+        return inputs * self.scale_factor
 
+    def get_config(self):
+        config = super().get_config()
+        config.update({"scale_factor": self.scale_factor})
+        return config
+
+def load_dataset(dataset_dir):
+    """Loads validation dataset using tf.data API."""
+    dataset = image_dataset_from_directory(
+        dataset_dir,
+        image_size=(IMAGE_SIZE, IMAGE_SIZE),
+        batch_size=BATCH_SIZE,
+        shuffle=False  # No need to shuffle for evaluation
+    )
+    
+    class_names = dataset.class_names
+    num_classes = len(class_names)
+    
+    return dataset, class_names, num_classes
 
 def evaluate(model_dir, dataset_dir):
     """
-    Begins evaluating the entire architecture.
+    Evaluates a trained model against a dataset.
     """
-    # Session configuration.
-    sess_config = tf.ConfigProto(
-        allow_soft_placement=True,
-        log_device_placement=False,
-        intra_op_parallelism_threads=0,  # Autocompute how many threads to run
-        gpu_options=tf.GPUOptions(force_gpu_compatible=True))
+    model_path = os.path.join(model_dir, "final_model.h5")  # Ensure .h5 format
 
-    config = tf.contrib.learn.RunConfig(
-        session_config=sess_config, model_dir=model_dir)
+    if not os.path.exists(model_path):
+        raise Exception(f"Model file {model_path} does not exist. Train the model first.")
 
-    eval_input_fn = functools.partial(
-        input_fn,
-        dataset_dir=dataset_dir,
-        split_name='validation',
-        is_training=False)
+    print(f"Loading model from {model_path}...")
 
-    # Get the number of classes from the label file
-    labels_to_class_names, num_classes = read_label_file(dataset_dir)
+    # Use custom_objects to load the model correctly
+    with tf.keras.utils.custom_object_scope({'CustomScaleLayer': CustomScaleLayer}):
+        model = tf.keras.models.load_model(model_path)
 
-    classifier = tf.estimator.Estimator(
-        model_fn=get_model_fn(num_classes),
-        config=config)
+    # Load dataset
+    dataset, class_names, num_classes = load_dataset(dataset_dir)
 
-    # .predict() returns an iterator of dicts;
-    y = classifier.predict(input_fn=eval_input_fn)
+    # Get predictions
+    predictions = model.predict(dataset)
+    predicted_classes = np.argmax(predictions, axis=1)
 
-    num_food_image = {}
+    # Save images with predicted class names
+    save_results(dataset, predicted_classes, class_names, model_dir)
 
-    for pred in y:
-        predicted_class = labels_to_class_names[int(pred['classes'])]
-        food_dir = '../Validations/%s/%s' % (os.path.basename(
-            model_dir), predicted_class)
+    # Evaluate model
+    loss, accuracy = model.evaluate(dataset)
+    print(f"Evaluation Results - Loss: {loss:.4f}, Accuracy: {accuracy:.4f}")
 
-        if not os.path.exists(food_dir):
-            os.makedirs(food_dir)
+def save_results(dataset, predicted_classes, class_names, model_dir):
+    """
+    Saves validation images with their predicted class labels.
+    """
+    validation_results_dir = os.path.join(model_dir, "Validations")
+    os.makedirs(validation_results_dir, exist_ok=True)
 
-        file_name = os.path.join(food_dir, '%s.png' % num_food_image.get(predicted_class, 1))
+    print("Saving evaluation results...")
 
-        num_food_image[predicted_class] = num_food_image.get(predicted_class, 1) + 1
+    for i, (image_batch, label_batch) in enumerate(dataset):
+        for j in range(len(image_batch)):
+            img_array = np.array(image_batch[j] * 255, dtype=np.uint8)  # Convert back to 0-255 range
+            predicted_class = class_names[predicted_classes[i * BATCH_SIZE + j]]
+            
+            # Save the image with predicted class name
+            save_path = os.path.join(validation_results_dir, f"{predicted_class}_{i * BATCH_SIZE + j}.png")
+            cv2.imwrite(save_path, img_array)
 
-        scipy.misc.imsave(file_name, pred['features'])
-
+    print(f"Evaluation images saved to {validation_results_dir}")
 
 if __name__ == '__main__':
-    PARSER = argparse.ArgumentParser(
-        description='Evaluate a model against a dataset.')
+    parser = argparse.ArgumentParser(description='Evaluate a trained model against a dataset.')
 
-    PARSER.add_argument('--model',
-                        required=True,
-                        help='The name of the pre-trained model\'s folder.')
+    parser.add_argument('--model', required=True, help='Path to the trained model directory.')
+    parser.add_argument('--dataset', required=True, help='Path to the dataset directory.')
 
-    PARSER.add_argument('--dataset',
-                        required=True,
-                        help='The folder corresponding to this model\'s dataset.')
+    args = parser.parse_args()
 
-    if not os.path.exists(PARSER.parse_args().model):
-        raise Exception("Path %s doesn't exist." % PARSER.parse_args().model)
+    if not os.path.exists(args.model):
+        raise Exception(f"Path {args.model} doesn't exist.")
 
-    if not os.path.exists(PARSER.parse_args().dataset):
-        raise Exception("Path %s doesn't exist." % PARSER.parse_args().dataset)
+    if not os.path.exists(args.dataset):
+        raise Exception(f"Path {args.dataset} doesn't exist.")
 
-    # A (supposed) 5% percent boost in certain GPUs by using faster convolution operations
-    os.environ['TF_SYNC_ON_FINISH'] = '0'
-    os.environ['TF_ENABLE_WINOGRAD_NONFUSED'] = '1'
-
-    evaluate(PARSER.parse_args().model, PARSER.parse_args().dataset)
+    evaluate(args.model, args.dataset)
