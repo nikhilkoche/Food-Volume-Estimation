@@ -5,11 +5,12 @@ from __future__ import print_function
 
 import os
 import tensorflow as tf
+import tf_slim as slim
 import inception_preprocessing
 import math
 import sys
 
-slim = tf.contrib.slim
+# slim = tf.contrib.slim
 
 LABELS_FILENAME = 'labels.txt'
 
@@ -161,7 +162,9 @@ def _dataset_exists(dataset_dir, _NUM_SHARDS, output_filename):
         for shard_id in range(_NUM_SHARDS):
             filename = _get_dataset_filename(
                 dataset_dir, split_name, shard_id, _NUM_SHARDS=_NUM_SHARDS, output_filename=output_filename)
-            if not tf.gfile.Exists(filename):
+            # if not tf.gfile.Exists(filename):
+            if not tf.io.gfile.exists(filename):
+
                 return False
     return True
 
@@ -213,13 +216,17 @@ def _convert_dataset(split_name, filenames, class_names_to_ids, dataset_dir, _NU
   with tf.Graph().as_default():
     image_reader = ImageReader()
 
-    with tf.Session('') as sess:
+    # with tf.Session('') as sess:
+    with tf.compat.v1.Session('') as sess:
+
 
       for shard_id in range(_NUM_SHARDS):
         output_filename = _get_dataset_filename(
             dataset_dir, split_name, shard_id, _NUM_SHARDS=_NUM_SHARDS, output_filename=tfrecord_filename)
 
-        with tf.python_io.TFRecordWriter(output_filename) as tfrecord_writer:
+        # with tf.python_io.TFRecordWriter(output_filename) as tfrecord_writer:
+        with tf.io.TFRecordWriter(output_filename) as tfrecord_writer:
+
           start_ndx = shard_id * num_per_shard
           end_ndx = min((shard_id+1) * num_per_shard, len(filenames))
           for i in range(start_ndx, end_ndx):
@@ -228,7 +235,9 @@ def _convert_dataset(split_name, filenames, class_names_to_ids, dataset_dir, _NU
             sys.stdout.flush()
 
             # Read the filename:
-            image_data = tf.gfile.FastGFile(filenames[i], 'rb').read()
+            # image_data = tf.gfile.FastGFile(filenames[i], 'rb').read()
+            image_data = tf.compat.v1.gfile.FastGFile(filenames[i], 'rb').read()
+
             height, width = image_reader.read_image_dims(sess, image_data)
 
             class_name = os.path.basename(os.path.dirname(filenames[i]))
@@ -246,7 +255,9 @@ class ImageReader(object):
 
   def __init__(self):
     # Initializes function that decodes RGB JPEG data.
-    self._decode_jpeg_data = tf.placeholder(dtype=tf.string)
+    #self._decode_jpeg_data = tf.placeholder(dtype=tf.string)
+    self._decode_jpeg_data = tf.compat.v1.placeholder(dtype=tf.string)
+
     self._decode_jpeg = tf.image.decode_jpeg(self._decode_jpeg_data, channels=3)
 
   def read_image_dims(self, sess, image_data):
@@ -334,7 +345,9 @@ def write_label_file(labels_to_class_names, dataset_dir,
     filename: The filename where the class names are written.
   """
   labels_filename = os.path.join(dataset_dir, filename)
-  with tf.gfile.Open(labels_filename, 'w') as f:
+  # with tf.gfile.Open(labels_filename, 'w') as f:
+  with tf.io.gfile.Open(labels_filename, 'w') as f:
+
     for label in labels_to_class_names:
       class_name = labels_to_class_names[label]
       f.write('%d:%s\n' % (label, class_name))
